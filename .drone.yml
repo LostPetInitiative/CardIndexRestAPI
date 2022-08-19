@@ -24,7 +24,6 @@ steps:
       from_secret: docker_password
     repo: lostpetinitiative/search-api-gateway
     target: final
-    context: CardIndexRestAPI
     dockerfile: CardIndexRestAPI/Dockerfile
     auto_tag: true
     force_tag: true
@@ -42,7 +41,6 @@ steps:
       from_secret: docker_password
     repo: lostpetinitiative/search-api-gateway
     target: final
-    context: CardIndexRestAPI
     dockerfile: CardIndexRestAPI/Dockerfile
     auto_tag: true
     force_tag: true
