@@ -25,6 +25,7 @@ steps:
     repo: lostpetinitiative/search-api-gateway
     target: final
     context: CardIndexRestAPI
+    dockerfile: CardIndexRestAPI/Dockerfile
     auto_tag: true
     force_tag: true
     build_args:
@@ -42,6 +43,7 @@ steps:
     repo: lostpetinitiative/search-api-gateway
     target: final
     context: CardIndexRestAPI
+    dockerfile: CardIndexRestAPI/Dockerfile
     auto_tag: true
     force_tag: true
     build_args:
