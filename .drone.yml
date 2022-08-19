@@ -22,7 +22,7 @@ steps:
       from_secret: docker_username
     password:
       from_secret: docker_password
-    repo: lostpetinitiative/cassandra-rest-api
+    repo: lostpetinitiative/search-api-gateway
     target: final
     context: CardIndexRestAPI
     auto_tag: true
@@ -39,7 +39,7 @@ steps:
       from_secret: docker_username
     password:
       from_secret: docker_password
-    repo: lostpetinitiative/cassandra-rest-api
+    repo: lostpetinitiative/search-api-gateway
     target: final
     context: CardIndexRestAPI
     auto_tag: true
