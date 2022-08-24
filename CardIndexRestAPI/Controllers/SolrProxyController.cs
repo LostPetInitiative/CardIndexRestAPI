@@ -41,7 +41,8 @@ namespace SolrAPI.Controllers
         /// <param name="response">Where to write proxied data</param>
         /// <returns></returns>
         private static async Task ProxyHttpPost(string requestID, string requstURL, HttpContent? content, HttpResponse response) {            
-            HttpClient client = new HttpClient();            
+            HttpClient client = new HttpClient();
+            client.Timeout = TimeSpan.FromMinutes(20);
             client.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
             
             Trace.TraceInformation($"{requestID}: Issung request {requstURL}.");
@@ -151,8 +152,13 @@ namespace SolrAPI.Controllers
             Trace.TraceInformation($"{requestHash}: Got request.");
             try
             {
-                string featureDims = String.Join(",", Enumerable.Range(0, request.Features.Length).Select(idx => $"{request.FeaturesIdent}_{idx}_d"));
-                string featuresTargetVal = String.Join(',', request.Features);
+
+                var features = request.Features; //.Take(900).ToArray();
+
+                Trace.TraceInformation($"Feature length is {features.Length}");
+                string featureDims = String.Join(",", Enumerable.Range(0, features.Length).Select(idx => $"{request.FeaturesIdent}_{idx}_d"));
+                //string featuresTargetVal = String.Join(',', features.Select(d => Math.Round(d,3)));
+                string featuresTargetVal = String.Join(',', features);
 
                 DateTime shortTermSearchStart = request.EventType switch
                 {
@@ -190,17 +196,24 @@ namespace SolrAPI.Controllers
                     _ => throw new ArgumentException($"Unknown EventType: {request.EventType}")
                 };
 
-
+                string searchExpr = $"search({this.searchConfig.ImagesCollectionName},fq=\"animal:{request.Animal} AND {typeSearchTerm} AND (({shortTermSearchTerm})OR({longTermSearchTerm}))\",q=\"*:*\",fl=\"id, event_time, {featureDims}\",sort=\"event_time asc\",qt=\"/select\")";
+                Trace.TraceInformation($"Search expr {searchExpr}");
+                string selectExpr = $"select({searchExpr},id,cosineSimilarity(array({featureDims}), array({featuresTargetVal})) as similarity)";
+                Trace.TraceInformation($"select expr {selectExpr}");
+                string havingExpt = $"having({selectExpr}, gt(similarity, {this.searchConfig.SimilarityThreshold}))";
+                Trace.TraceInformation($"heaving expr {havingExpt}");
                 string solrFindLostRequest =
-                    $"top(n={this.searchConfig.MaxReturnCount},having(select(search({this.searchConfig.ImagesCollectionName},q=\"animal:{request.Animal} AND {typeSearchTerm} AND (({shortTermSearchTerm})OR({longTermSearchTerm}))\",fl=\"id, event_time, {featureDims}\",sort=\"event_time asc\",qt=\"/export\"),id,cosineSimilarity(array({featureDims}), array({featuresTargetVal})) as similarity), gt(similarity, {this.searchConfig.SimilarityThreshold})),sort=\"similarity desc\")";
-                //Trace.TraceInformation($"{requestHash}: Got request. Issuing: {solrFindLostRequest}");
+                    $"top(n={this.searchConfig.MaxReturnCount},{havingExpt},sort=\"similarity desc\")";
+                Trace.TraceInformation($"{requestHash}: Got request. Issuing: {solrFindLostRequest}");
                 
                 //solrFindLostRequest = "top(n=100,select(search(kashtankaimages,q=\"animal:Cat AND card_type:Lost AND ((event_time:[2019-06-19T21:00:00.0000000Z TO 2019-08-02T21:00:00.0000000Z] AND {!geofilt sfield=location pt=56.273015,43.93563 d=1000})OR(event_time:[ * TO 2019-08-02T21:00:00.0000000Z] AND {!geofilt sfield=location pt=56.273015,43.93563 d=20}))\",fl=\"id, event_time\",sort=\"event_time asc\",qt=\"/export\"),id,),sort=\"similarity desc\")";
 
                 // To avoid "URL is too long" we pass the request inside POST body
                 FormUrlEncodedContent requestContent = new FormUrlEncodedContent(new KeyValuePair<string, string>[] {
                     new KeyValuePair<string, string>("expr",solrFindLostRequest)
-                }); ;
+                });
+
+                //return NotFound();
 
                 await ProxyHttpPost(requestHash, this.solrImagesStreamingExpressionsURL, requestContent, Response);
 
@@ -241,13 +254,11 @@ namespace SolrAPI.Controllers
             if (!string.IsNullOrEmpty(typeConstraint)) {
                 requestParams.Add("fq", typeConstraint);
             }
-
-            string queryStr =
-                string.Join('&', requestParams.Select(kvp => $"{HttpUtility.UrlEncode(kvp.Key)}={HttpUtility.UrlEncode(kvp.Value)}"));
-
-            string finalURL = $"{this.solrCardsSelectExpressionsURL}?{queryStr}";
+            
+            FormUrlEncodedContent requestContent = new FormUrlEncodedContent(requestParams);
+            
             try {
-                await ProxyHttpPost("latest cards request", finalURL,null, Response);
+                await ProxyHttpPost("latest cards request", this.solrCardsSelectExpressionsURL, requestContent, Response);
             }
             catch (Exception err)
             {
