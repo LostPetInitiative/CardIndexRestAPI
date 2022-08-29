@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Mvc;
 using System.Net.Http;
 using System.Web;
 using static CardIndexRestAPI.DataSchema.Requests;
+using System.Numerics;
 
 namespace SolrAPI.Controllers
 {
@@ -70,6 +71,7 @@ namespace SolrAPI.Controllers
             await outStream.DisposeAsync();
         }
 
+        /*
         [EnableCors]
         [HttpPost("MatchedCardsSearch")]
         public async Task MatchedCardsSearch([FromBody]GetMatchesRequest request)
@@ -144,6 +146,8 @@ namespace SolrAPI.Controllers
             }
         }
 
+        */
+
         [EnableCors]
         [HttpPost("MatchedImagesSearch")]
         public async Task MatchedImagesSearch([FromBody] GetMatchesRequest request)
@@ -153,7 +157,9 @@ namespace SolrAPI.Controllers
             try
             {
 
-                var features = request.Features; //.Take(900).ToArray();
+                var features = request.Features.ToArray(); //.Take(900).ToArray();
+                double norm = Math.Sqrt(features.Sum(x => x * x));
+                features = features.Select(x => x / norm).ToArray();
 
                 Trace.TraceInformation($"Feature length is {features.Length}");
                 string featureDims = String.Join(",", Enumerable.Range(0, features.Length).Select(idx => $"{request.FeaturesIdent}_{idx}_d"));
@@ -189,33 +195,57 @@ namespace SolrAPI.Controllers
                 string longTermSpaceSpec = $"{{!geofilt sfield=location pt={request.Lat},{request.Lon} d={this.searchConfig.LongTermSearchRadiusKm}}}";
                 string longTermSearchTerm = $"{longTermTimeSpec} AND {longTermSpaceSpec}";
 
-                string typeSearchTerm = request.EventType switch
+                List<string> additionalFilter = new List<string>();
+                if (request.FilterFar ?? false)
+                    additionalFilter.Add($"({longTermSearchTerm})");
+                if (request.FilterLongAgo ?? false)
+                    additionalFilter.Add($"({shortTermSearchTerm})");
+                string additionalFiltersStr = String.Join(" OR ", additionalFilter);
+
+                string typeFilterTerm = request.EventType switch // this one inverts the specification
                 {
                     "Found" => "card_type:Lost",
                     "Lost" => "card_type:Found",
                     _ => throw new ArgumentException($"Unknown EventType: {request.EventType}")
                 };
 
-                string searchExpr = $"search({this.searchConfig.ImagesCollectionName},fq=\"animal:{request.Animal} AND {typeSearchTerm} AND (({shortTermSearchTerm})OR({longTermSearchTerm}))\",q=\"*:*\",fl=\"id, event_time, {featureDims}\",sort=\"event_time asc\",qt=\"/select\")";
-                Trace.TraceInformation($"Search expr {searchExpr}");
-                string selectExpr = $"select({searchExpr},id,cosineSimilarity(array({featureDims}), array({featuresTargetVal})) as similarity)";
-                Trace.TraceInformation($"select expr {selectExpr}");
-                string havingExpt = $"having({selectExpr}, gt(similarity, {this.searchConfig.SimilarityThreshold}))";
-                Trace.TraceInformation($"heaving expr {havingExpt}");
-                string solrFindLostRequest =
-                    $"top(n={this.searchConfig.MaxReturnCount},{havingExpt},sort=\"similarity desc\")";
-                Trace.TraceInformation($"{requestHash}: Got request. Issuing: {solrFindLostRequest}");
-                
-                //solrFindLostRequest = "top(n=100,select(search(kashtankaimages,q=\"animal:Cat AND card_type:Lost AND ((event_time:[2019-06-19T21:00:00.0000000Z TO 2019-08-02T21:00:00.0000000Z] AND {!geofilt sfield=location pt=56.273015,43.93563 d=1000})OR(event_time:[ * TO 2019-08-02T21:00:00.0000000Z] AND {!geofilt sfield=location pt=56.273015,43.93563 d=20}))\",fl=\"id, event_time\",sort=\"event_time asc\",qt=\"/export\"),id,),sort=\"similarity desc\")";
+                string animalFilterTerm = request.Animal switch
+                {
+                    "Cat" => "animal:Cat",
+                    "Dog" => "animal:Dog",
+                    _ => throw new ArgumentException($"Unknown Animal: {request.Animal}")
+                };
+
+                string cardTypeAndAnimalFilter = $"{typeFilterTerm} AND {animalFilterTerm}";
+
+                // example from docs: https://solr.apache.org/guide/solr/latest/query-guide/dense-vector-search.html#query-time
+                // { !knn f = vector topK = 10}[1.0, 2.0, 3.0, 4.0]
+
+                const string embeddingName = "calvin_zhirui_embedding";
+
+                string similaritySearchExpr = $"{{!knn f={embeddingName} topK={searchConfig.SimilarityKnnTopK}}}[{featuresTargetVal}]";
+
+
+                Trace.TraceInformation($"sim search expr: ${similaritySearchExpr}");
+
+                List<KeyValuePair<string, string>> requestParams = new List<KeyValuePair<string, string>>(new KeyValuePair<string, string>[] {
+                    //new KeyValuePair<string, string>("expr",solrFindLostRequest)
+                    new KeyValuePair<string, string>("q",similaritySearchExpr),
+                    new KeyValuePair<string, string>("fl",$"id,{embeddingName}"),
+                    new KeyValuePair<string, string>("fq",cardTypeAndAnimalFilter),
+                    new KeyValuePair<string, string>("rows",searchConfig.MaxReturnCount.ToString())
+                });
+
+                if (!string.IsNullOrEmpty(additionalFiltersStr))
+                    requestParams.Add(new KeyValuePair<string, string>("fq", additionalFiltersStr));
 
                 // To avoid "URL is too long" we pass the request inside POST body
-                FormUrlEncodedContent requestContent = new FormUrlEncodedContent(new KeyValuePair<string, string>[] {
-                    new KeyValuePair<string, string>("expr",solrFindLostRequest)
-                });
+                FormUrlEncodedContent requestContent = new FormUrlEncodedContent(requestParams);
+                
 
                 //return NotFound();
 
-                await ProxyHttpPost(requestHash, this.solrImagesStreamingExpressionsURL, requestContent, Response);
+                await ProxyHttpPost(requestHash, this.solrImagesSelectExpressionsURL, requestContent, Response);
 
 
                 Trace.TraceInformation($"{requestHash}: Transmitted successfully");

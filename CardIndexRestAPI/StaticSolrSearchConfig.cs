@@ -21,7 +21,7 @@ namespace SolrAPI
 
         public TimeSpan ShortTermLength { get; private set; }
 
-        public double SimilarityThreshold { get; private set; }
+        public int SimilarityKnnTopK { get; private set; }
 
         public TimeSpan ReverseTimeGapLength { get; private set; }
 
@@ -33,7 +33,7 @@ namespace SolrAPI
             double longTermSearchRadiusKm,
             double shortTermSearchRadiusKm,
             TimeSpan shortTermLength,
-            double similarityThreshold,
+            int similarityKnnTopK,
             TimeSpan reverseTimeGapLength
             ) {
             this.SolrAddress = address;
@@ -43,7 +43,7 @@ namespace SolrAPI
             this.LongTermSearchRadiusKm = longTermSearchRadiusKm;
             this.ShortTermSearchRadiusKm = shortTermSearchRadiusKm;
             this.ShortTermLength = shortTermLength;
-            this.SimilarityThreshold = similarityThreshold;
+            this.SimilarityKnnTopK = similarityKnnTopK;
             this.ReverseTimeGapLength = reverseTimeGapLength;
         }
     }
