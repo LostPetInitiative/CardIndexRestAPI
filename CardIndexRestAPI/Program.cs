@@ -55,8 +55,8 @@ namespace CardIndexRestAPI
                 TimeSpan reverseTimeGapLength = TimeSpan.FromDays(int.Parse(Environment.GetEnvironmentVariable("REVERSE_TIME_GAP_LENGTH_DAYS") ?? "14"));
                 Trace.TraceInformation($"REVERSE_TIME_GAP_LENGTH_DAYS: {reverseTimeGapLength}");
 
-                double similarityThreshold = double.Parse(Environment.GetEnvironmentVariable("SIMILARITY_THRESHOLD") ?? "0.1");
-                Trace.TraceInformation($"SIMILARITY_THRESHOLD: {similarityThreshold}");
+                int similarityKnnTopK = int.Parse(Environment.GetEnvironmentVariable("SIMILARITY_KNN_TOP_K") ?? "200");
+                Trace.TraceInformation($"SIMILARITY_KNN_TOP_K: {similarityKnnTopK}");
 
                 //builder.Services.AddSingleton(typeof(IPhotoStorage), storage);
                 builder.Services.AddSingleton(typeof(ISolrSearchConfig),
@@ -65,7 +65,7 @@ namespace CardIndexRestAPI
                         longTermSearchRadiusKm,
                         shortTermSearchRadiusKm,
                         shortTermLength,
-                        similarityThreshold,
+                        similarityKnnTopK,
                         reverseTimeGapLength
                     ));
             }

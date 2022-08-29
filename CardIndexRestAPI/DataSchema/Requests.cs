@@ -16,6 +16,8 @@
             public double[] Features { get; set; }
             public string FeaturesIdent { get; set; }
 
+            public bool? FilterFar { get; set; }
+            public bool? FilterLongAgo { get; set; }
 
             public override int GetHashCode()
             {
@@ -24,6 +26,8 @@
                     (this.Animal?.GetHashCode() ?? 0) ^
                     this.EventTime.GetHashCode() ^
                     this.EventType.GetHashCode() ^
+                    (this.FilterFar?.GetHashCode() ?? 0) ^
+                    (this.FilterLongAgo?.GetHashCode() ?? 0) ^
                      this.Features.Select(f => f.GetHashCode()).Aggregate(0, (acc, elem) => acc ^ elem) ^
                     this.Features.Length.GetHashCode() ^
                     (this.FeaturesIdent?.GetHashCode() ?? 0);

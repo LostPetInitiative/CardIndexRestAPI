@@ -11,6 +11,7 @@ using Microsoft.AspNetCore.Mvc;
 using System.Net.Http;
 using System.Web;
 using static CardIndexRestAPI.DataSchema.Requests;
+using System.Numerics;
 
 namespace SolrAPI.Controllers
 {
@@ -41,7 +42,8 @@ namespace SolrAPI.Controllers
         /// <param name="response">Where to write proxied data</param>
         /// <returns></returns>
         private static async Task ProxyHttpPost(string requestID, string requstURL, HttpContent? content, HttpResponse response) {            
-            HttpClient client = new HttpClient();            
+            HttpClient client = new HttpClient();
+            client.Timeout = TimeSpan.FromMinutes(20);
             client.DefaultRequestHeaders.Accept.Add(new System.Net.Http.Headers.MediaTypeWithQualityHeaderValue("application/json"));
             
             Trace.TraceInformation($"{requestID}: Issung request {requstURL}.");
@@ -69,6 +71,7 @@ namespace SolrAPI.Controllers
             await outStream.DisposeAsync();
         }
 
+        /*
         [EnableCors]
         [HttpPost("MatchedCardsSearch")]
         public async Task MatchedCardsSearch([FromBody]GetMatchesRequest request)
@@ -143,6 +146,8 @@ namespace SolrAPI.Controllers
             }
         }
 
+        */
+
         [EnableCors]
         [HttpPost("MatchedImagesSearch")]
         public async Task MatchedImagesSearch([FromBody] GetMatchesRequest request)
@@ -151,8 +156,15 @@ namespace SolrAPI.Controllers
             Trace.TraceInformation($"{requestHash}: Got request.");
             try
             {
-                string featureDims = String.Join(",", Enumerable.Range(0, request.Features.Length).Select(idx => $"{request.FeaturesIdent}_{idx}_d"));
-                string featuresTargetVal = String.Join(',', request.Features);
+
+                var features = request.Features.ToArray(); //.Take(900).ToArray();
+                double norm = Math.Sqrt(features.Sum(x => x * x));
+                features = features.Select(x => x / norm).ToArray();
+
+                Trace.TraceInformation($"Feature length is {features.Length}");
+                string featureDims = String.Join(",", Enumerable.Range(0, features.Length).Select(idx => $"{request.FeaturesIdent}_{idx}_d"));
+                //string featuresTargetVal = String.Join(',', features.Select(d => Math.Round(d,3)));
+                string featuresTargetVal = String.Join(',', features);
 
                 DateTime shortTermSearchStart = request.EventType switch
                 {
@@ -183,26 +195,57 @@ namespace SolrAPI.Controllers
                 string longTermSpaceSpec = $"{{!geofilt sfield=location pt={request.Lat},{request.Lon} d={this.searchConfig.LongTermSearchRadiusKm}}}";
                 string longTermSearchTerm = $"{longTermTimeSpec} AND {longTermSpaceSpec}";
 
-                string typeSearchTerm = request.EventType switch
+                List<string> additionalFilter = new List<string>();
+                if (request.FilterFar ?? false)
+                    additionalFilter.Add($"({longTermSearchTerm})");
+                if (request.FilterLongAgo ?? false)
+                    additionalFilter.Add($"({shortTermSearchTerm})");
+                string additionalFiltersStr = String.Join(" OR ", additionalFilter);
+
+                string typeFilterTerm = request.EventType switch // this one inverts the specification
                 {
                     "Found" => "card_type:Lost",
                     "Lost" => "card_type:Found",
                     _ => throw new ArgumentException($"Unknown EventType: {request.EventType}")
                 };
 
+                string animalFilterTerm = request.Animal switch
+                {
+                    "Cat" => "animal:Cat",
+                    "Dog" => "animal:Dog",
+                    _ => throw new ArgumentException($"Unknown Animal: {request.Animal}")
+                };
 
-                string solrFindLostRequest =
-                    $"top(n={this.searchConfig.MaxReturnCount},having(select(search({this.searchConfig.ImagesCollectionName},q=\"animal:{request.Animal} AND {typeSearchTerm} AND (({shortTermSearchTerm})OR({longTermSearchTerm}))\",fl=\"id, event_time, {featureDims}\",sort=\"event_time asc\",qt=\"/export\"),id,cosineSimilarity(array({featureDims}), array({featuresTargetVal})) as similarity), gt(similarity, {this.searchConfig.SimilarityThreshold})),sort=\"similarity desc\")";
-                //Trace.TraceInformation($"{requestHash}: Got request. Issuing: {solrFindLostRequest}");
-                
-                //solrFindLostRequest = "top(n=100,select(search(kashtankaimages,q=\"animal:Cat AND card_type:Lost AND ((event_time:[2019-06-19T21:00:00.0000000Z TO 2019-08-02T21:00:00.0000000Z] AND {!geofilt sfield=location pt=56.273015,43.93563 d=1000})OR(event_time:[ * TO 2019-08-02T21:00:00.0000000Z] AND {!geofilt sfield=location pt=56.273015,43.93563 d=20}))\",fl=\"id, event_time\",sort=\"event_time asc\",qt=\"/export\"),id,),sort=\"similarity desc\")";
+                string cardTypeAndAnimalFilter = $"{typeFilterTerm} AND {animalFilterTerm}";
+
+                // example from docs: https://solr.apache.org/guide/solr/latest/query-guide/dense-vector-search.html#query-time
+                // { !knn f = vector topK = 10}[1.0, 2.0, 3.0, 4.0]
+
+                const string embeddingName = "calvin_zhirui_embedding";
+
+                string similaritySearchExpr = $"{{!knn f={embeddingName} topK={searchConfig.SimilarityKnnTopK}}}[{featuresTargetVal}]";
+
+
+                Trace.TraceInformation($"sim search expr: ${similaritySearchExpr}");
+
+                List<KeyValuePair<string, string>> requestParams = new List<KeyValuePair<string, string>>(new KeyValuePair<string, string>[] {
+                    //new KeyValuePair<string, string>("expr",solrFindLostRequest)
+                    new KeyValuePair<string, string>("q",similaritySearchExpr),
+                    new KeyValuePair<string, string>("fl",$"id,{embeddingName}"),
+                    new KeyValuePair<string, string>("fq",cardTypeAndAnimalFilter),
+                    new KeyValuePair<string, string>("rows",searchConfig.MaxReturnCount.ToString())
+                });
+
+                if (!string.IsNullOrEmpty(additionalFiltersStr))
+                    requestParams.Add(new KeyValuePair<string, string>("fq", additionalFiltersStr));
 
                 // To avoid "URL is too long" we pass the request inside POST body
-                FormUrlEncodedContent requestContent = new FormUrlEncodedContent(new KeyValuePair<string, string>[] {
-                    new KeyValuePair<string, string>("expr",solrFindLostRequest)
-                }); ;
+                FormUrlEncodedContent requestContent = new FormUrlEncodedContent(requestParams);
+                
 
-                await ProxyHttpPost(requestHash, this.solrImagesStreamingExpressionsURL, requestContent, Response);
+                //return NotFound();
+
+                await ProxyHttpPost(requestHash, this.solrImagesSelectExpressionsURL, requestContent, Response);
 
 
                 Trace.TraceInformation($"{requestHash}: Transmitted successfully");
@@ -241,13 +284,11 @@ namespace SolrAPI.Controllers
             if (!string.IsNullOrEmpty(typeConstraint)) {
                 requestParams.Add("fq", typeConstraint);
             }
-
-            string queryStr =
-                string.Join('&', requestParams.Select(kvp => $"{HttpUtility.UrlEncode(kvp.Key)}={HttpUtility.UrlEncode(kvp.Value)}"));
-
-            string finalURL = $"{this.solrCardsSelectExpressionsURL}?{queryStr}";
+            
+            FormUrlEncodedContent requestContent = new FormUrlEncodedContent(requestParams);
+            
             try {
-                await ProxyHttpPost("latest cards request", finalURL,null, Response);
+                await ProxyHttpPost("latest cards request", this.solrCardsSelectExpressionsURL, requestContent, Response);
             }
             catch (Exception err)
             {
