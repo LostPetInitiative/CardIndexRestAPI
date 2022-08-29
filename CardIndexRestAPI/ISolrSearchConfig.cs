@@ -15,6 +15,6 @@ namespace SolrAPI
         public double ShortTermSearchRadiusKm { get; }
         public TimeSpan ShortTermLength { get; }
         public TimeSpan ReverseTimeGapLength { get; }
-        public double SimilarityKnnTopK { get;}
+        public int SimilarityKnnTopK { get;}
     }
 }
