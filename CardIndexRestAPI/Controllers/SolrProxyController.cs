@@ -300,5 +300,54 @@ namespace SolrAPI.Controllers
                 await Response.CompleteAsync();
             }
         }
+
+        [EnableCors]
+        [HttpGet("RecentCrawledStats")]
+        public async Task RecentCrawledStats([FromQuery] string cardsNamespace, [FromQuery] RecentStatsMode mode = RecentStatsMode.Days)
+        {
+            string facettingStartStr = mode switch
+            {
+                RecentStatsMode.Days => "NOW-7DAY/DAY",
+                RecentStatsMode.Months => "NOW-12MONTH/MONTH",
+                _ => string.Empty
+            };
+            string facettingRangeStr = mode switch
+            {
+                RecentStatsMode.Days => "+1DAY",
+                RecentStatsMode.Months => "+1MONTH",
+                _ => string.Empty
+            };
+
+            Trace.TraceInformation($"Fetching statistics for ns {cardsNamespace} over recent {mode}(s)");
+
+            Dictionary<string, string> requestParams = new Dictionary<string, string>();
+            requestParams.Add("q", "*:*");
+            requestParams.Add("fl", "id, card_creation_time");
+            requestParams.Add("fq", $"id:/{cardsNamespace}.*/");
+            requestParams.Add("facet", "true");
+            requestParams.Add("facet.range", "card_creation_time");
+            requestParams.Add("facet.range.start", facettingStartStr);
+            requestParams.Add("facet.range.end", "NOW");
+            requestParams.Add("facet.range.gap", facettingRangeStr);
+
+            
+            FormUrlEncodedContent requestContent = new FormUrlEncodedContent(requestParams);
+
+            try
+            {
+                await ProxyHttpPost("recent stats", this.solrCardsSelectExpressionsURL, requestContent, Response);
+            }
+            catch (Exception err)
+            {
+                string errorMsg = $"Exception occurred during recent stats fetch: {err}";
+                Trace.TraceError(errorMsg);
+                Response.StatusCode = 500;
+                Response.ContentLength = ASCIIEncoding.Unicode.GetByteCount(errorMsg);
+                await Response.WriteAsync(errorMsg);
+                await Response.CompleteAsync();
+            }
+        }
     }
+
+    public enum RecentStatsMode { Days, Months}
 }
