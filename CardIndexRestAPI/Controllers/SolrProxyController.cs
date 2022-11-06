@@ -149,6 +149,12 @@ namespace SolrAPI.Controllers
         */
 
         [EnableCors]
+        [HttpGet("Health")]
+        public IActionResult Health() {
+            return Ok("Works!");
+        }
+
+        [EnableCors]
         [HttpPost("MatchedImagesSearch")]
         public async Task MatchedImagesSearch([FromBody] GetMatchesRequest request)
         {
@@ -318,7 +324,7 @@ namespace SolrAPI.Controllers
                 _ => string.Empty
             };
 
-            Trace.TraceInformation($"Fetching statistics for ns {cardsNamespace} over recent {mode}(s)");
+            Trace.TraceInformation($"Fetching statistics for ns \"{cardsNamespace.Replace(Environment.NewLine, "")}\" over recent {mode}(s)");
 
             Dictionary<string, string> requestParams = new Dictionary<string, string>();
             requestParams.Add("q", "*:*");
