@@ -12,6 +12,7 @@ using System.Net.Http;
 using System.Web;
 using static CardIndexRestAPI.DataSchema.Requests;
 using System.Numerics;
+using System.Text.RegularExpressions;
 
 namespace SolrAPI.Controllers
 {
@@ -147,6 +148,12 @@ namespace SolrAPI.Controllers
         }
 
         */
+
+        [EnableCors]
+        [HttpGet("Health")]
+        public IActionResult Health() {
+            return Ok("Works!");
+        }
 
         [EnableCors]
         [HttpPost("MatchedImagesSearch")]
@@ -300,5 +307,63 @@ namespace SolrAPI.Controllers
                 await Response.CompleteAsync();
             }
         }
+
+        [EnableCors]
+        [HttpGet("RecentCrawledStats/{cardsNamespace}")]
+        public async Task RecentCrawledStats([FromRoute] string cardsNamespace, [FromQuery] RecentStatsMode mode = RecentStatsMode.Days)
+        {
+            // checking input
+            var match = Regex.Match(cardsNamespace, @"^[0-9A-Za-z\-]+$", RegexOptions.IgnoreCase);
+            if (!match.Success)
+            {
+                throw new FormatException($"cardsNamespace must contain 0-9A-Za-z or '-' characters only");
+            }
+
+            string facettingStartStr = mode switch
+            {
+                RecentStatsMode.Days => "NOW-7DAY/DAY",
+                RecentStatsMode.Months => "NOW-12MONTH/MONTH",
+                _ => throw new NotSupportedException()
+            };
+            string facettingRangeStr = mode switch
+            {
+                RecentStatsMode.Days => "+1DAY",
+                RecentStatsMode.Months => "+1MONTH",
+                _ => throw new NotSupportedException()
+            };
+
+            var safeCardsNamespace = cardsNamespace.Replace(Environment.NewLine, "");
+
+            Trace.TraceInformation($"Fetching statistics for ns \"{safeCardsNamespace}\" over recent {mode}(s)");
+
+            Dictionary<string, string> requestParams = new Dictionary<string, string>();
+            requestParams.Add("q", "*:*");
+            requestParams.Add("fl", "id, card_creation_time");
+            requestParams.Add("fq", $"id:/{cardsNamespace}.*/");
+            requestParams.Add("facet", "true");
+            requestParams.Add("facet.range", "card_creation_time");
+            requestParams.Add("facet.range.start", facettingStartStr);
+            requestParams.Add("facet.range.end", "NOW");
+            requestParams.Add("facet.range.gap", facettingRangeStr);
+
+            
+            FormUrlEncodedContent requestContent = new FormUrlEncodedContent(requestParams);
+
+            try
+            {
+                await ProxyHttpPost("recent stats", this.solrCardsSelectExpressionsURL, requestContent, Response);
+            }
+            catch (Exception err)
+            {
+                string errorMsg = $"Exception occurred during recent stats fetch: {err}";
+                Trace.TraceError(errorMsg);
+                Response.StatusCode = 500;
+                Response.ContentLength = ASCIIEncoding.Unicode.GetByteCount(errorMsg);
+                await Response.WriteAsync(errorMsg);
+                await Response.CompleteAsync();
+            }
+        }
     }
+
+    public enum RecentStatsMode { Days, Months}
 }
