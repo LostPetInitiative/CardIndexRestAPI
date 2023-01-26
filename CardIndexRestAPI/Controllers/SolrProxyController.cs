@@ -216,12 +216,14 @@ namespace SolrAPI.Controllers
                     _ => throw new ArgumentException($"Unknown EventType: {request.EventType}")
                 };
 
-                string animalFilterTerm = request.Animal switch
+                // validation animal
+                var match = Regex.Match(request.Animal, @"^[A-Za-z]+$", RegexOptions.None);
+                if (!match.Success)
                 {
-                    "Cat" => "animal:Cat",
-                    "Dog" => "animal:Dog",
-                    _ => throw new ArgumentException($"Unknown Animal: {request.Animal}")
-                };
+                    throw new FormatException($"Animal field must contain A-Za-z characters only");
+                }
+
+                string animalFilterTerm = $"animal:{request.Animal}";
 
                 string cardTypeAndAnimalFilter = $"{typeFilterTerm} AND {animalFilterTerm}";
 
@@ -313,7 +315,7 @@ namespace SolrAPI.Controllers
         public async Task RecentCrawledStats([FromRoute] string cardsNamespace, [FromQuery] RecentStatsMode mode = RecentStatsMode.Days)
         {
             // checking input
-            var match = Regex.Match(cardsNamespace, @"^[0-9A-Za-z\-]+$", RegexOptions.IgnoreCase);
+            var match = Regex.Match(cardsNamespace, @"^[0-9A-Za-z\-]+$", RegexOptions.None);
             if (!match.Success)
             {
                 throw new FormatException($"cardsNamespace must contain 0-9A-Za-z or '-' characters only");
@@ -332,9 +334,8 @@ namespace SolrAPI.Controllers
                 _ => throw new NotSupportedException()
             };
 
-            var safeCardsNamespace = cardsNamespace.Replace(Environment.NewLine, "");
-
-            Trace.TraceInformation($"Fetching statistics for ns \"{safeCardsNamespace}\" over recent {mode}(s)");
+            var modeStr = mode.ToString();
+            Trace.TraceInformation($"Fetching statistics for ns \"{cardsNamespace}\" over recent {modeStr}(s)");
 
             Dictionary<string, string> requestParams = new Dictionary<string, string>();
             requestParams.Add("q", "*:*");
